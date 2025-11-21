@@ -15,6 +15,7 @@ RESAMPLE_RATIO = 1/3         # 1/3 means one-third of the input length.
 INPUT_DTYPE = torch.int16    # Options: torch.float32 or torch.int16
 OUTPUT_DTYPE = torch.int16   # Options: torch.float32 or torch.int16
 save_path = f"resampler_{INPUT_LENGTH}_to_{int(INPUT_LENGTH * RESAMPLE_RATIO)}.onnx"
+OPSET = 17
 
 
 # ==========================================
@@ -78,7 +79,7 @@ def export_to_onnx():
         dummy_input,
         save_path,
         export_params=True,
-        opset_version=17,
+        opset_version=OPSET,
         do_constant_folding=True,
         input_names=['input_audio'],
         output_names=['output_audio'],
