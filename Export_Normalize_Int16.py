@@ -7,6 +7,7 @@ DYANMIC = True                          # Set True for dynamic shape.
 INPUT_AUDIO_LENGTH = 16000              # Set for static shape.
 DTYPE = torch.int16                     # [torch.float32, torch.int16]
 save_path = "normalize_to_int16.onnx"
+OPSET = 17
 
 class NormalizeToInt16(nn.Module):
     def __init__(self):
@@ -37,7 +38,7 @@ def export_to_onnx():
         dummy_input,
         save_path,
         export_params=True,
-        opset_version=17,
+        opset_version=OPSET,
         do_constant_folding=True,
         input_names=['audio'],
         output_names=['normalized_audio'],
