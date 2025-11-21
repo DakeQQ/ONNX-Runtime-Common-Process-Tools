@@ -16,6 +16,7 @@ MAX_SIGNAL_LENGTH   = 2048           # Maximum number of frames for the audio le
 WINDOW_TYPE         = 'hann'         # bartlett | blackman | hamming | hann | kaiser
 PAD_MODE            = 'constant'     # reflect | constant
 CENTER_PAD          = True           # Use center=True or not for STFT process.
+OPSET = 17
 
 STFT_TYPE  = "stft_B"                # stft_A: output real_part only;  stft_B: outputs real_part & imag_part
 ISTFT_TYPE = "istft_B"               # istft_A: Inputs = [magnitude, phase];  istft_B: Inputs = [real_part, imag_part], The dtype of imag_part is float format.
@@ -277,7 +278,7 @@ def main():
             stft_model, (dummy_audio,), export_path_stft,
             input_names=['input_audio'], output_names=out_names,
             dynamic_axes=dyn_axes_sft if DYNAMIC_AXES else None,
-            opset_version=17, do_constant_folding=True, dynamo=False
+            opset_version=OPSET, do_constant_folding=True, dynamo=False
         )
         # ─── ISTFT export ──────────────────────────────────────────────────
         istft_model = STFT_Process(ISTFT_TYPE, center_pad=CENTER_PAD).eval()
@@ -307,7 +308,7 @@ def main():
             istft_model, dummy_inp, export_path_istft,
             input_names=in_names, output_names=['output_audio'],
             dynamic_axes=dyn_axes_ist if DYNAMIC_AXES else None,
-            opset_version=17, do_constant_folding=True, dynamo=False
+            opset_version=OPSET, do_constant_folding=True, dynamo=False
         )
 
         # ─── quick comparisons ────────────────────────────────────────────
