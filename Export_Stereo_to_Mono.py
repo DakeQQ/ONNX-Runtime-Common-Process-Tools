@@ -4,7 +4,7 @@ from onnxslim import slim
 
 save_path = "stereo_to_mono.onnx"
 DYNAMIC = True               # Set True for dunamic length input.
-INPUT_AUDIO_LENGTH = 16000   # Foe staic input shape.
+INPUT_AUDIO_LENGTH = 16000   # For staic input shape.
 IN_DTYPE = torch.int16       # [torch.int16, torch.float32]
 OUT_DTYPE = torch.int16      # [torch.int16, torch.float32]
 OPSET = 17
