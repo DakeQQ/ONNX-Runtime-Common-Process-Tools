@@ -11,7 +11,7 @@ from onnxslim import slim
 DYNAMIC = False              # Set True for the dynamic shape.
 USE_MEAN_POOLING = True      # This will trigger the Reshape + Mean optimization. Only works for integer downsample case.
 INPUT_LENGTH = 48000         # Set for the static shape.
-RESAMPLE_RATIO = 1/3         # 1/3 means one-third of the input length.
+RESAMPLE_RATIO = 1/3         # 1/3 means one-third of the input length (sample rate).
 INPUT_DTYPE = torch.int16    # Options: torch.float32 or torch.int16
 OUTPUT_DTYPE = torch.int16   # Options: torch.float32 or torch.int16
 save_path = f"resampler_{INPUT_LENGTH}_to_{int(INPUT_LENGTH * RESAMPLE_RATIO)}.onnx"
