@@ -7,7 +7,7 @@ DYANMIC = True                          # Set True for dynamic shape.
 INPUT_AUDIO_LENGTH = 16000              # Set for static shape.
 DTYPE = torch.int16                     # [torch.float32, torch.int16]
 save_path = "normalize_to_int16.onnx"
-OPSET = 17
+OPSET = 23
 
 class NormalizeToInt16(nn.Module):
     def __init__(self):
@@ -19,19 +19,18 @@ class NormalizeToInt16(nn.Module):
         self.eps = self.eps.view(1, 1, -1)
 
     def forward(self, audio):
-        max_val, _ = torch.max(torch.abs(audio), dim=-1, keepdim=True)
+        max_val, _ = torch.max(torch.abs(audio).float(), dim=-1, keepdim=True)
         scaling_factor = (32767.0 / (max_val + self.eps))
         if DTYPE == torch.int16:
             scaling_factor = scaling_factor.to(torch.int16)
         normalized = audio * scaling_factor
-        normalized = torch.clamp(normalized, -32768, 32767)
         return normalized
 
 
 def export_to_onnx():
     model = NormalizeToInt16()
     model.eval()
-    dummy_input = torch.ones(1, 1, INPUT_AUDIO_LENGTH, dtype=DTYPE)
+    dummy_input = torch.ones((1, 1, INPUT_AUDIO_LENGTH), dtype=DTYPE)
 
     torch.onnx.export(
         model,
