@@ -18,10 +18,10 @@ class Config:
     USE_FLOAT16 = False
     
     # Buffer settings
-    ZEROS_BUFFER_SIZE = 1000                            # Size of pre-allocated zeros buffer [ZEROS_BUFFER_SIZE, 64]
+    ZEROS_BUFFER_SIZE = 1000                            # Size of pre-allocated zeros buffer [ZEROS_BUFFER_SIZE, 64], 1000 for 30 seconds audio inputs
     
     # Reshape settings
-    FRAME_SIZE = 512                                    # Reshape audio to [-1, FRAME_SIZE]
+    FRAME_SIZE = 512                                    # Reshape audio to [-1, FRAME_SIZE], 512 for 16kHz. 256 for 8kHz Silero_VAD
     CONCAT_ZEROS_SIZE = 64                              # Concat zeros with shape [N, CONCAT_ZEROS_SIZE]
     
     # Test settings
