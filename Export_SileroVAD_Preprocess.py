@@ -22,11 +22,7 @@ class Config:
     
     # Reshape settings
     FRAME_SIZE = 512                                    # Reshape audio to [-1, FRAME_SIZE], 512 for 16kHz. 256 for 8kHz Silero_VAD
-    CONCAT_ZEROS_SIZE = 64                              # Concat zeros with shape [N, CONCAT_ZEROS_SIZE]
-    
-    # Test settings
-    TEST_AUDIO_LENGTHS = [16000, 24000, 32768, 48000]   # Audio lengths to test
-    TOLERANCE = 1e-5                                    # Tolerance for output comparison
+    CONCAT_ZEROS_SIZE = 64                              # Concat zeros with shape [N, CONCAT_ZEROS_SIZE]. Do not edit.
 
 # ============================================================
 
