@@ -179,8 +179,6 @@ def export_to_onnx(config):
             print(f"  Output shape: {output[0].shape}")
         else:
             print(f"  Output shape: {output[0].shape} * {len(output)}")
-    
-    return model, onnx_filepath
 
 
 if __name__ == "__main__":
@@ -188,4 +186,4 @@ if __name__ == "__main__":
     config = Config()
     
     # Export model with current configuration
-    model, onnx_file = export_to_onnx(config)
+    export_to_onnx(config)
