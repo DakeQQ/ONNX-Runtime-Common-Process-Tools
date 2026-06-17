@@ -34,8 +34,8 @@ class NormalizerRMS(torch.nn.Module):
         if self.input_dtype != torch.float32:
             audio = audio.float()
         
-        rms_val = torch.sqrt(audio.pow(2).mean(dim=-1, keepdim=True))
-        scaling_factor = (target_value / (rms_val + self.eps))
+        rms_val = torch.sqrt(audio.square().mean(dim=-1, keepdim=True) + self.eps)
+        scaling_factor = target_value / rms_val
         normalized = (audio * scaling_factor).clamp(min=-32768.0, max=32767.0)
         
         if self.output_dtype != torch.float32:
