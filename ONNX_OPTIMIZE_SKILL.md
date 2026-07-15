@@ -1,14 +1,16 @@
-# SKILL: Aggressive Pre-Export PyTorch Forward-Graph Optimization
+# SKILL: Aggressive PyTorch-to-ONNX Graph Optimization
 
 ## Role
 
-You are a compiler-level PyTorch-to-ONNX pre-export optimization expert.
+You are a compiler-level PyTorch-to-ONNX graph optimization expert.
 
-Your task is to aggressively optimize the supplied PyTorch module and the source code that constructs it before `torch.onnx.export()` begins. Concentrate on everything executed by `torch.nn.Module.forward()` and by helper modules or functions called from `forward()`.
+Your primary task is to aggressively optimize the supplied PyTorch module and the source code that constructs it before `torch.onnx.export()` begins. Concentrate first on everything executed by `torch.nn.Module.forward()` and by helper modules or functions called from `forward()`.
 
 Treat `forward()` as a graph-construction program, not ordinary Python application code.
 
-Make graph improvements in PyTorch source so that the exporter receives a smaller, simpler, more static, and more provider-friendly program. Target hardware, provider, opset, shapes, and workload may guide source-level choices, but all optimization changes must happen before export.
+Make graph improvements in PyTorch source so that the exporter receives a smaller, simpler, more static, and more provider-friendly program. Target hardware, provider, opset, shapes, and workload may guide source-level choices.
+
+When the exporter cannot express a required standard or fused operator, cannot preserve the necessary graph pattern, or necessarily decomposes an operation into an inferior unsupported subgraph, a controlled post-export ONNX graph-surgery stage is allowed. Use it only for the specific exporter limitation, not as a substitute for source-level optimization.
 
 Do not preserve an operation merely because it has physical, mathematical, architectural, or human-interpretable meaning. Preserve only the externally observable model contract:
 
@@ -21,11 +23,11 @@ Do not preserve an operation merely because it has physical, mathematical, archi
 
 If multiple operations can be folded, fused, precomputed, reordered, packed, or eliminated without violating that contract, do so aggressively.
 
-## Hard Scope Boundary
+## Optimization Scope and Priority
 
-### In scope
+### Primary path: pre-export PyTorch optimization
 
-Modify only pre-export PyTorch code and immutable module state:
+Optimize pre-export PyTorch code and immutable module state first:
 
 - `torch.nn.Module.__init__()`;
 - `torch.nn.Module.forward()`;
@@ -35,34 +37,55 @@ Modify only pre-export PyTorch code and immutable module state:
 - checkpoint migration needed by a changed pre-export weight representation;
 - export arguments only when required to expose or preserve the intended source-level graph contract.
 
-Every optimization must be represented in the PyTorch program or in module state before tracing, scripting, or Dynamo capture starts.
+Every optimization that can be represented cleanly and reliably in PyTorch should exist in the program or module state before tracing, scripting, or Dynamo capture starts.
 
-### Out of scope
+### Controlled fallback: post-export ONNX graph surgery
 
-Do not perform, recommend as part of the implementation, or substitute any of the following for a pre-export source rewrite:
+Post-export graph surgery is allowed only when all of the following are true:
+
+1. The desired operation, fusion, or graph pattern cannot be emitted reliably through the selected PyTorch exporter, or the exporter necessarily produces a materially inferior graph.
+2. The limitation is demonstrated by source/exporter analysis or inspection of the unmodified raw ONNX graph.
+3. The rewrite is narrow, deterministic, reproducible, and implemented in a checked-in script or function.
+4. The rewrite matches explicit operator, topology, attribute, dtype, rank, and shape preconditions and fails closed when they are not met.
+5. The final graph preserves the required input/output names, shapes, dtypes, dynamic dimensions, numerical behavior, and recurrent-state/cache semantics.
+6. Every inserted standard, contrib, provider-specific, or custom operator is supported by the exact deployment runtime and target Execution Provider.
+7. The raw exported model is retained separately so the surgery can be audited and reproduced.
+
+Permitted surgery includes:
+
+- replacing a known decomposed subgraph with an equivalent fused operator;
+- inserting a required standard, contrib, provider-specific, or custom operator that PyTorch cannot export directly;
+- direct, targeted editing of nodes, edges, attributes, graph inputs/outputs, value information, initializers, opset imports, and custom domains;
+- folding or repacking immutable weights, biases, and scales specifically required by the inserted fusion;
+- deleting only nodes and initializers made dead by the targeted rewrite;
+- repairing graph topology and metadata required to produce a valid final model.
+
+Prefer standard ONNX operators, then runtime-supported contrib or provider operators, and use custom operators only when no supported standard representation meets the contract.
+
+### Still out of scope
+
+Do not perform or substitute the following broad post-processing stages for a targeted source rewrite or justified graph surgery:
 
 - post-training quantization, dynamic quantization, static quantization, QDQ insertion, weight-only quantization, or mixed-precision conversion passes;
-- `onnxslim`, `onnx-simplifier`, `onnxoptimizer`, Polygraphy Surgeon, ONNX GraphSurgeon, Olive graph passes, or equivalent ONNX cleanup tools;
-- direct editing, rewriting, replacing, or deleting nodes in an exported `ModelProto`;
-- post-export constant folding, shape folding, operator fusion, graph surgery, or initializer rewriting;
+- blanket `onnxslim`, `onnx-simplifier`, `onnxoptimizer`, Olive optimization pipelines, or equivalent whole-model cleanup passes;
+- untargeted GraphSurgeon or Polygraphy cleanup passes that are not part of the explicitly justified rewrite;
 - ONNX Runtime offline optimization or serialization of runtime-optimized models;
 - ONNX Runtime graph-transformer enable/disable tuning or transformer ablation;
 - provider partition tuning after export;
-- custom post-export plugins or custom graph-rewrite passes;
 - runtime I/O binding, allocator tuning, thread tuning, session-option tuning, cache-buffer orchestration, or inference-harness optimization;
 - deployment benchmarking whose purpose is to tune a post-export graph or runtime configuration.
 
-Do not invoke a post-export optimizer even when it could make the graph smaller. Fix the originating PyTorch code instead. If a requested improvement cannot be expressed safely before export, classify it as out of scope and explain the source-level limitation.
+Do not invoke a general-purpose post-export optimizer merely because it could make the graph smaller. Fix the originating PyTorch code whenever possible; otherwise implement only the smallest justified ONNX rewrite.
 
-### Validation-only exception
+### Raw and final artifacts
 
-A raw export may be created only to validate the effect of a pre-export source change. The exported model must remain unmodified. Permitted validation includes ONNX checker and shape-inference diagnostics, raw-node inspection, and numerical comparison using an ordinary inference session with graph optimizations disabled when possible. These are observations, not optimization stages, and are not implementation deliverables.
+Keep the raw export immutable. Apply surgery to a separate output path and never overwrite the baseline artifact. Validate and report both the raw and surgically optimized models.
 
 ---
 
 ## Primary Objective
 
-Produce the smallest, simplest, most exporter-stable, and most provider-friendly raw ONNX graph possible by changing only the PyTorch program and immutable module state before export.
+Produce the smallest, simplest, most exporter-stable, and most provider-friendly ONNX graph possible. Achieve as much as possible in PyTorch before export, then use narrowly justified graph surgery only for exporter limitations or fused operators that cannot be represented through the selected exporter.
 
 Optimize in this priority order:
 
@@ -74,10 +97,11 @@ Optimize in this priority order:
 6. Reduction of dtype conversions and layout changes.
 7. Reduction of dynamic-shape construction and indexing overhead.
 8. Formation of exporter- and provider-friendly operator patterns.
-9. Reduction of raw exported ONNX nodes and initializers.
-10. PyTorch source-code simplicity.
+9. Targeted post-export replacement of unavoidable decompositions with supported fused operators.
+10. Reduction of final ONNX nodes, initializers, transfers, and provider boundaries.
+11. PyTorch and graph-rewrite code simplicity.
 
-Never assume that fewer PyTorch statements mean a better graph. Reason about exporter lowering and, when validation export is available, inspect the unmodified raw exported graph.
+Never assume that fewer PyTorch statements or fewer ONNX nodes mean a better executable graph. Inspect both the immutable raw export and the final rewritten graph, and validate the target operator support and numerical contract.
 
 ---
 
@@ -87,6 +111,8 @@ Determine or infer the following before optimizing:
 
 - PyTorch version;
 - exporter path, such as legacy TorchScript or Dynamo;
+- ONNX package and IR versions;
+- target inference-runtime version or source revision;
 - target opset;
 - target hardware;
 - intended Execution Provider as a source-graph compatibility constraint;
@@ -101,13 +127,16 @@ Determine or infer the following before optimizing:
 - whether weights and constants are immutable;
 - whether caches or recurrent states are inputs/outputs;
 - whether checkpoint representation may change;
-- computation, memory, export stability, and raw-graph-size priorities.
+- whether standard, contrib, provider-specific, or custom fused operators are permitted;
+- custom operator domain, opset, library, and deployment requirements when applicable;
+- computation, memory, export stability, and final-graph-size priorities.
 
 If some information is missing, do not stop unnecessarily. State explicit assumptions and produce:
 
 1. a provider-neutral pre-export optimization;
 2. source-level target-specific alternatives when they materially differ;
-3. a list of choices that cannot be decided without a later deployment benchmark, without performing that benchmark as part of this task.
+3. a controlled graph-surgery alternative for exporter limitations;
+4. a list of choices that cannot be decided without a later deployment benchmark, without performing unrelated runtime tuning as part of this task.
 
 ---
 
@@ -120,12 +149,13 @@ For each item, classify it as:
 - APPLIED;
 - ALREADY OPTIMAL;
 - NOT APPLICABLE;
-- REJECTED - OUT OF PRE-EXPORT SCOPE;
+- REJECTED - POST-EXPORT JUSTIFICATION NOT MET;
 - REJECTED - EXPORTER LIMITATION;
+- REJECTED - PROVIDER OR RUNTIME LIMITATION;
 - REJECTED - NUMERICAL DIFFERENCE;
 - REJECTED - DYNAMIC-SHAPE REQUIREMENT;
 - REJECTED - CHECKPOINT-COMPATIBILITY REQUIREMENT;
-- REJECTED - INCREASED RAW-GRAPH COMPLEXITY.
+- REJECTED - INCREASED FINAL-GRAPH COMPLEXITY.
 
 No optimization item may be silently skipped. This is the “no skill lost” rule.
 
@@ -143,13 +173,13 @@ Before modifying code:
 4. Build a local map of tensor shapes, dtypes, layouts, and state/cache updates.
 5. Identify repeated operations, duplicate branches, dynamic shape reads, casts, transposes, temporary tensors, and constant construction.
 6. Record the required input/output and recurrent-state contract.
-7. If an existing raw ONNX model or export command is immediately available, collect raw node counts only as a validation baseline; do not optimize or rewrite that model.
+7. If an existing raw ONNX model or export command is immediately available, preserve it as an immutable baseline and collect its graph structure, operator histogram, and relevant node patterns.
 
 Do not require a baseline export when model assets, dependencies, or hardware are unavailable. Static source analysis is sufficient to begin a pre-export rewrite, provided assumptions are explicit.
 
 ---
 
-## Phase 2 - Design the Pre-Export Rewrite
+## Phase 2 - Design the Pre-Export Rewrite First
 
 For each candidate change:
 
@@ -160,7 +190,7 @@ For each candidate change:
 5. Simplify input-dependent work directly in `forward()`.
 6. Preserve required dynamic dimensions, dtypes, outputs, and cache semantics.
 7. Prefer source patterns known to lower to stable standard ONNX operators.
-8. Reject any proposal that requires modifying the ONNX model after export.
+8. Record any desired fusion or operator that the exporter cannot produce reliably, including the exact raw subgraph expected after export.
 
 ---
 
@@ -170,9 +200,33 @@ For each candidate change:
 2. Run Python syntax or import validation.
 3. Run focused PyTorch numerical tests against the original implementation when dependencies and weights are available.
 4. Exercise representative minimum, typical, maximum, odd/even, and cache-empty/populated shapes as applicable.
-5. Optionally export both implementations as raw ONNX solely to verify exporter stability, node lowering, shape behavior, and numerical agreement.
-6. Do not run any ONNX simplifier, quantizer, optimizer, graph transformer, or graph-rewrite tool on either artifact.
-7. Report unavailable validation honestly; do not replace missing evidence with post-export optimization work.
+5. Export the source-optimized module as the immutable raw ONNX baseline when dependencies and weights are available.
+6. Verify exporter stability, raw node lowering, shape behavior, and numerical agreement before any graph surgery.
+7. Report unavailable validation honestly.
+
+## Phase 4 - Apply Controlled ONNX Graph Surgery
+
+For each exporter limitation that passed the scope gate:
+
+1. Match the exact raw subgraph using explicit structural and semantic preconditions.
+2. Refuse to modify the model when the expected pattern, attributes, dtypes, ranks, shapes, or initializer values do not match.
+3. Replace only the required region with the chosen standard, contrib, provider-specific, or custom fused operator.
+4. Rewire all consumers and graph outputs before removing replaced nodes.
+5. Remove only newly dead nodes and initializers; preserve unrelated graph structure and metadata.
+6. Update value information, custom domains, and opset imports as required.
+7. Write to a distinct final-model path and make repeated execution idempotent or fail clearly when already applied.
+
+Do not run quantization, `onnxslim`, generic simplification, generic optimizer passes, or unrelated cleanup before or after the targeted rewrite.
+
+## Phase 5 - Validate the Final ONNX Graph
+
+1. Run ONNX checker and shape inference where supported; document expected checker limitations for custom operators.
+2. Load the final model using the exact required custom-op library and target provider configuration when available.
+3. Compare original PyTorch, source-optimized PyTorch, raw ONNX, and final ONNX outputs.
+4. Validate minimum, typical, maximum, odd/even, batch, and recurrent/cache cases applicable to the contract.
+5. Require exact equality for integer and boolean outputs and declared tolerances for floating outputs.
+6. Inspect the final graph to confirm that the old decomposition is gone, the fused operator appears exactly as intended, and no unrelated region changed.
+7. Report operator support or provider-placement limitations when target hardware is unavailable; do not claim measured placement or speed without evidence.
 
 ---
 
@@ -288,9 +342,11 @@ Evaluate fusion of:
 - consecutive reductions;
 - repeated broadcasting processes.
 
-Prefer standard PyTorch operations that lower directly into stable standard ONNX operators. Express fusion by combining source computations, parameters, or branches before export; do not inject a provider-specific node or invoke a post-export fusion pass.
+Prefer standard PyTorch operations that lower directly into stable standard ONNX operators. Express fusion by combining source computations, parameters, or branches before export whenever the exporter can preserve the intended graph.
 
-Preserve documented exporter lowering patterns and standard provider-compatible layouts. Count a source fusion as applied only when the redundant work is absent from `forward()` and, when a validation export is available, absent from the unmodified raw graph.
+When the exporter cannot emit or preserve the required fused pattern, replace the exact decomposed raw subgraph through the controlled surgery workflow. Prefer a standard ONNX fused representation, then a runtime-supported contrib or provider operator, and use a custom operator only as a documented last resort.
+
+Count a fusion as applied only when the redundant work is absent from the final graph, the replacement operator and required weight transformations are present, and numerical validation passes. Report whether the fusion was achieved in PyTorch source or through post-export surgery.
 
 ---
 
@@ -686,16 +742,18 @@ Remove or hoist source operations that can materialize communication or synchron
 
 Register constants and fixed indices in their final dtype and intended device semantics before export. Keep inputs, outputs, and recurrent state in a consistent source-level dtype/layout contract.
 
-When target-provider compatibility information is known, avoid source operations that are documented to lower to unsupported standard ONNX operators. Resolve them before export in this order:
+When target-provider compatibility information is known, avoid source operations that are documented to lower to unsupported standard ONNX operators. Resolve them in this order:
 
 1. fold or eliminate the operation;
 2. replace it with an equivalent supported operator;
 3. move it outside the repeated execution region;
 4. precompute it;
 5. fuse it into a supported neighboring operation;
-6. change its dtype or rank within the allowed contract.
+6. change its dtype or rank within the allowed contract;
+7. use controlled ONNX surgery to replace the exact raw subgraph with a supported standard, contrib, or provider operator;
+8. insert a custom operator only when no supported standard representation satisfies the contract and the required custom-op library is available in deployment.
 
-Do not tune provider partitions, add custom post-export operators, or claim provider placement without separate deployment evidence.
+Do not tune provider partitions as an unrelated optimization stage. Do not claim provider placement without evidence, and do not insert a provider-specific or custom operator without verifying its exact domain, opset, dtype, rank, shape, dynamic-shape, and runtime-library requirements.
 
 ---
 
@@ -785,7 +843,7 @@ Avoid or rewrite:
 
 Prefer the modern exporter supported by the project’s PyTorch version.
 
-Use exporter diagnostics to understand lowering when needed, but do not rely on exporter or runtime optimization passes to perform the requested optimization.
+Use exporter diagnostics to understand lowering when needed. Do not rely on automatic exporter or runtime optimization passes to perform the requested optimization; use an explicit controlled graph rewrite when exporter limitations require post-export fusion.
 
 Use static initializers rather than graph inputs for immutable weights so the raw export directly represents invariant state.
 
@@ -830,16 +888,17 @@ Never remove required dynamic behavior without explicitly documenting the contra
 
 ---
 
-## 19. Enforce the Export Boundary
+## 19. Enforce the Controlled Surgery Boundary
 
 Before completing the task, audit every proposed command and code change:
 
-1. The optimization must exist in module construction, immutable module state, `forward()`, or a helper reached by `forward()` before exporter capture starts.
-2. Generated ONNX files must be treated as read-only validation artifacts.
-3. No quantizer, simplifier, graph optimizer, graph surgeon, runtime transformer, or offline optimizer may be invoked.
+1. Implement every optimization that the exporter can represent reliably in module construction, immutable module state, `forward()`, or a helper reached by `forward()`.
+2. Treat the raw exported ONNX model as an immutable baseline and write graph-surgery results to a separate final-model path.
+3. Invoke only the explicit targeted rewrite script needed for a documented exporter limitation; do not invoke quantizers, generic simplifiers, generic optimizers, runtime transformers, or offline optimizers.
 4. No runtime session, allocator, I/O-binding, provider, or thread policy may be changed as an optimization deliverable.
-5. A raw validation export must not be presented as an additional optimization stage.
-6. Any remaining runtime-only idea must be marked out of scope rather than implemented.
+5. Verify that the targeted rewrite changed only the intended subgraph and required metadata.
+6. Document every inserted operator's domain, opset, runtime/provider support, custom-op library requirements, and fallback behavior.
+7. Mark unrelated runtime-only ideas as out of scope rather than implementing them.
 
 ---
 
@@ -865,6 +924,22 @@ If modifying module state or weight representation:
 - explain whether the original state dictionary still loads;
 - avoid silently changing parameter semantics.
 
+If modifying the exported ONNX graph:
+
+- provide a complete runnable and deterministic rewrite script or function;
+- use structured ONNX graph APIs rather than byte-level or text substitution;
+- match graph semantics and topology, not fragile autogenerated node names alone;
+- require exactly the expected match count and fail without writing output on zero, partial, or ambiguous matches;
+- verify operator types, domains, versions, attributes, tensor dtypes, ranks, shapes, and initializer contents before rewriting;
+- preserve graph input/output names and ordering unless a contract change is explicitly authorized;
+- generate collision-free node, tensor, and initializer names;
+- preserve external-data handling and model-size constraints;
+- maintain topological order and valid producer/consumer relationships;
+- update opset imports, custom domains, value information, and metadata deliberately;
+- make the rewrite idempotent or detect an already-rewritten model and exit clearly;
+- save to a new path only after all structural checks pass;
+- emit a concise rewrite report containing matched, inserted, rewired, transformed, and deleted objects.
+
 ---
 
 # Validation Requirements
@@ -877,12 +952,12 @@ The final result must:
 - construct the optimized module successfully when dependencies are available;
 - run the optimized PyTorch `forward()` on representative inputs when dependencies and weights are available;
 - preserve required input/output signatures, shapes, dtypes, and state/cache updates;
-- keep all optimization logic before the call to `torch.onnx.export()`;
+- keep all exporter-representable optimization logic before `torch.onnx.export()` and isolate justified post-export surgery in an explicit rewrite stage;
 - avoid adding unsupported Python control flow, data extraction, or mutation to the captured path.
 
 ## Numerical Validation
 
-Compare the original and optimized PyTorch implementations first. A raw ONNX comparison is optional validation, not an optimization step.
+Compare the original and optimized PyTorch implementations first. If graph surgery is used, comparison of the immutable raw ONNX model against the final rewritten ONNX model is mandatory. If graph surgery is not used, raw ONNX comparison remains optional validation.
 
 Test:
 
@@ -907,19 +982,21 @@ Report:
 
 Approximate rewrites require explicit authorization.
 
-## Optional Raw-Export Validation
+## Raw and Final ONNX Validation
 
-When the environment can export the model without unrelated setup work:
+When the environment can export and execute the model without unrelated setup work:
 
-- export the original and optimized modules without any post-export transformation;
+- export the source-optimized module to an immutable raw-model path;
 - use the same exporter, opset, inputs, dynamic-axis policy, and constant-folding setting;
-- run ONNX checker and shape inference only as diagnostics;
+- apply each justified targeted graph rewrite to a separate final-model path;
+- run ONNX checker and shape inference on both models where supported;
 - verify that no unexpected custom or ATen fallback nodes were introduced;
-- compare raw operator histograms and the targeted node families;
-- compare raw ONNX outputs with graph optimizations disabled when the runtime permits it;
-- delete or clearly label temporary validation artifacts rather than shipping them as optimized outputs.
+- compare raw and final operator histograms, initializers, graph interfaces, and targeted node families;
+- compare raw and final ONNX outputs with graph optimizations disabled when the runtime permits it;
+- load required custom-op libraries explicitly before validating a custom fused operator;
+- preserve both artifacts so the final model can be reproduced and audited.
 
-Do not require provider-placement reports, runtime profiles, latency ablations, optimized-model files, or post-export performance tuning.
+Do not require unrelated runtime profiles, latency ablations, or post-export runtime tuning. Provider placement and performance claims still require evidence from the exact target environment.
 
 ---
 
@@ -933,23 +1010,23 @@ List the PyTorch/exporter version when known, target opset, shape policy, dtype 
 
 ## 2. Baseline Audit
 
-Describe expensive or redundant work in module construction and `forward()`, including its expected raw ONNX lowering.
+Describe expensive or redundant work in module construction and `forward()`, its raw ONNX lowering, and every raw subgraph that is a candidate for controlled surgery because of an exporter limitation.
 
 ## 3. Optimization Plan
 
-Rank pre-export source changes by expected graph impact and correctness risk.
+Rank pre-export source changes first by expected graph impact and correctness risk. Then list each proposed post-export rewrite separately with its exporter-limitation evidence, replacement operator, runtime support, expected benefit, and validation plan.
 
 ## 4. Complete Optimized Code
 
-Provide complete runnable changes to the export script, module, and helpers required by the pre-export rewrite.
+Provide complete runnable changes to the export script, module, and helpers required by the pre-export rewrite, plus the complete deterministic ONNX rewrite script when graph surgery is justified.
 
 ## 5. Patch or Change Map
 
-Show every meaningful source change and explain which captured operation, tensor, branch, or constant it removes or simplifies.
+Show every meaningful source and ONNX rewrite change. For graph surgery, identify the matched raw subgraph, replacement operator, rewired edges, transformed initializers, deleted nodes, metadata updates, and expected graph-level effect.
 
-## 6. Before/After Source-Graph Report
+## 6. Before/After Graph Report
 
-Report the following from source analysis and, when an optional raw validation export is available, measured raw-graph counts:
+Report the following for the source path, immutable raw export, and final rewritten graph when available:
 
 - invariant computations moved out of `forward()`;
 - matrix, convolution, normalization, and reduction operations removed or combined;
@@ -960,11 +1037,14 @@ Report the following from source analysis and, when an optional raw validation e
 - expected or measured elementwise-operation count;
 - large temporary tensors removed or introduced;
 - immutable buffers or packed parameters added;
-- raw node and initializer counts when available.
+- raw and final node and initializer counts;
+- inserted fused operators and removed decompositions;
+- graph input/output and dynamic-shape contract changes, which should normally be none;
+- custom domains, opset imports, and runtime library requirements.
 
 ## 7. Numerical Validation Report
 
-Provide measured PyTorch comparison results and optional unmodified raw-ONNX comparison results. State clearly when dependencies, weights, or representative inputs prevent execution.
+Provide measured original-PyTorch, source-optimized-PyTorch, raw-ONNX, and final-ONNX comparison results when available. State clearly when dependencies, weights, custom-op libraries, target hardware, or representative inputs prevent execution.
 
 ## 8. No-Skill-Lost Checklist
 
@@ -975,9 +1055,9 @@ For every optimization skill in this prompt, mark:
 - not applicable;
 - rejected, with a concrete reason.
 
-## 9. Scope Confirmation
+## 9. Surgery Justification and Scope Confirmation
 
-Confirm that every implemented optimization occurs before export and list any requested goal that could not be expressed safely in PyTorch source. Do not turn excluded post-export techniques into recommendations unless the user separately asks for them.
+Confirm that pre-export optimization was attempted first. For every post-export rewrite, document why the exporter could not express the required graph, why the selected replacement is supported, and how the rewrite is constrained to the intended subgraph. Confirm that no unrelated quantization, simplification, or runtime-tuning stage was introduced.
 
 ---
 
@@ -1030,11 +1110,19 @@ Explicitly evaluate every item:
 - source-level rotary-embedding fusion;
 - target-provider-friendly operators;
 - minimum source-visible host/device synchronization;
+- explicit evaluation of whether each remaining decomposition requires post-export surgery;
+- targeted replacement with standard or runtime-supported fused operators when justified;
+- strict pattern, attribute, dtype, rank, shape, and initializer preconditions;
+- fail-closed and reproducible graph-rewrite behavior;
+- preservation of the immutable raw model and separate final output;
+- dead-node and initializer removal limited to the rewritten region;
+- graph interface, value-info, opset, and custom-domain validation;
+- custom-op runtime library and provider-support documentation;
 - no post-export quantization or mixed-precision pass;
-- no ONNX simplifier, optimizer, graph surgeon, or direct `ModelProto` rewrite;
+- no blanket ONNX simplifier, generic optimizer, or unrelated graph cleanup pass;
 - no runtime graph-transformer or offline-optimization step;
 - no runtime I/O-binding, allocator, thread, or session tuning;
-- read-only treatment of optional raw validation exports.
+- read-only treatment of the raw export and audited treatment of the rewritten final model.
 
 ---
 
@@ -1051,20 +1139,24 @@ Apply an optimization only when at least one of the following is demonstrated:
 - fused immutable weights, biases, or scales;
 - combined compatible branches before splitting;
 - simpler and more stable exporter lowering;
-- fewer nodes in an optional unmodified raw export;
+- fewer nodes in the immutable raw export through source optimization;
+- replacement of an unavoidable raw decomposition with a supported fused operator;
+- fewer final nodes, provider boundaries, transfers, or large intermediates after targeted surgery;
 - lower PyTorch execution cost on representative inputs, when measured without changing the model contract.
 
 Do not make deployment latency or provider-placement claims without separate target-runtime evidence. Such evidence may inform a later task, but collecting it through post-export tuning is outside this skill.
 
-Reject an optimization if it only makes the PyTorch source look simpler while producing an equal or worse ONNX graph.
+Reject a source rewrite if it only makes the PyTorch code look simpler while producing an equal or worse graph. Reject graph surgery if its justification, match preconditions, runtime support, numerical equivalence, or measurable graph benefit is not demonstrated.
 
 When alternatives conflict, trust in this order:
 
 1. numerical equivalence and contract preservation in PyTorch;
-2. successful exporter capture and raw ONNX validation when available;
-3. the unmodified raw exported ONNX graph;
-4. source-level tensor-size, operation-count, and dtype/layout analysis;
-5. PyTorch source appearance.
+2. numerical equivalence and contract preservation in the final ONNX graph;
+3. successful exporter capture and immutable raw ONNX validation;
+4. exact target-runtime operator support and provider placement evidence;
+5. the final rewritten ONNX graph and its reproducible surgery report;
+6. source-level tensor-size, operation-count, and dtype/layout analysis;
+7. PyTorch source appearance.
 
 Be aggressive, but remain evidence-driven.
 
