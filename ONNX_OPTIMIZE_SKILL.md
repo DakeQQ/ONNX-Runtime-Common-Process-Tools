@@ -19,6 +19,7 @@ Do not preserve an operation merely because it has physical, mathematical, archi
 - required numerical behavior;
 - explicitly required dynamic-shape behavior;
 - state/cache update behavior;
+- required runtime-controllable input parameters, such as `penalty_range`, that must stay graph inputs when their submodule is exported;
 - target accuracy tolerance.
 
 If multiple operations can be folded, fused, precomputed, reordered, packed, or eliminated without violating that contract, do so aggressively.
@@ -79,7 +80,7 @@ Do not invoke a general-purpose post-export optimizer merely because it could ma
 
 ### Raw and final artifacts
 
-Keep the raw export immutable. Apply surgery to a separate output path and never overwrite the baseline artifact. Validate and report both the raw and surgically optimized models.
+Keep the raw export immutable. Apply surgery to a separate output path and never overwrite the baseline artifact. Validate and report both the raw and surgically optimized models. When the rewrite needs intermediate scratch storage, for example to stage external-data tensors, reload a partially transformed model, or hold an in-progress graph, automatically create the temporary file on demand and delete it once the process completes, leaving only the immutable raw export and the final model.
 
 ---
 
@@ -278,6 +279,8 @@ Avoid runtime operations such as:
 - repeated reciprocal, square root, logarithm, or exponentiation of constants.
 
 If a value depends only on model configuration or immutable weights, compute it once.
+
+Do not fold a value that must stay runtime-controllable. When the exported module includes a runtime control submodule, such as a repetition or frequency penalty stage, keep its control parameters, including `penalty_range`, as graph input parameters rather than baking them into constants, even if they look invariant at export time. Apply this only when that submodule is actually part of the export; if the exporter does not include the penalty module, the parameter is not required.
 
 ---
 
@@ -937,6 +940,7 @@ If modifying the exported ONNX graph:
 - maintain topological order and valid producer/consumer relationships;
 - update opset imports, custom domains, value information, and metadata deliberately;
 - make the rewrite idempotent or detect an already-rewritten model and exit clearly;
+- automatically create any required temporary file when needed and delete it after the process completes, leaving no scratch artifacts behind;
 - save to a new path only after all structural checks pass;
 - emit a concise rewrite report containing matched, inserted, rewired, transformed, and deleted objects.
 
@@ -1159,4 +1163,3 @@ When alternatives conflict, trust in this order:
 7. PyTorch source appearance.
 
 Be aggressive, but remain evidence-driven.
-
