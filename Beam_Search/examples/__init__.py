@@ -1,0 +1,1 @@
+"""Example frontends for the standalone ONNX beam-search toolkit."""

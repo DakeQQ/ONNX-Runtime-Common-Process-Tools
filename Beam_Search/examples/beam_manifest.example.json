@@ -1,0 +1,38 @@
+{
+  "model": {
+    "prefill_model": "./models/LLM_PrefillBeam.onnx",
+    "decode_model": "./models/LLM_DecodeBeam.onnx",
+    "shared_initializers": null,
+    "state_count": 64,
+    "max_sequence_length": 4096,
+    "activations_fp16": false,
+    "io": {
+      "prefill_input_ids": "input_ids",
+      "prefill_save_ids": "save_id_in",
+      "prefill_beam_size": "beam_size",
+      "decode_input_ids": "input_ids",
+      "decode_sequence_length": "kv_seq_len",
+      "decode_previous_scores": "previous_prob",
+      "decode_save_ids": [
+        "save_id_in"
+      ],
+      "decode_beam_size": "beam_size",
+      "decode_top_k": "topK"
+    }
+  },
+  "prefill_inputs": {
+    "ids_len": [
+      "$prompt_length"
+    ],
+    "history_len": [
+      0
+    ],
+    "cache_len": [
+      0
+    ]
+  },
+  "decode_inputs": {},
+  "stop_token_ids": [
+    2
+  ]
+}
