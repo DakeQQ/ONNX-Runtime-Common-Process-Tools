@@ -5,8 +5,8 @@ from onnxslim import slim
 # Export to ONNX
 DYANMIC = True                          # Set True for dynamic shape.
 INPUT_AUDIO_LENGTH = 16000              # Set for static shape.
-IN_DTYPE = torch.int16                  # [torch.float32, torch.int16]
-OUT_DTYPE = torch.int16                 # [torch.float32, torch.int16]
+IN_DTYPE = torch.float32                  # [torch.float32, torch.int16]
+OUT_DTYPE = torch.float32                 # [torch.float32, torch.int16]
 save_path = "weighted_average.onnx"
 OPSET = 23
 
